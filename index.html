@@ -3,163 +3,114 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>School Books Record (Live)</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <title>Book Finder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 { margin-bottom: 20px; }
+    select, input {
+      padding: 10px;
+      margin: 10px;
+      font-size: 16px;
+    }
+    table {
+      width: 100%;
+      margin-top: 20px;
+      border-collapse: collapse;
+      background: white;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+    }
+    th { background: #007bff; color: white; }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body>
 
-  <!-- Navigation -->
-  <nav class="w-full bg-white shadow p-3 flex flex-wrap items-center gap-3 justify-between">
-    <div class="flex items-center gap-2">
-      <div class="text-xl font-bold">📚 School Books</div>
-      <div class="text-sm text-gray-500 hidden md:block">Live from Google Sheets</div>
-    </div>
+  <h1>📚 Book Finder</h1>
 
-    <div class="flex-1 max-w-md">
-      <input id="searchInput" type="text" placeholder="Search by book name, subject, or note..."
-        class="w-full border rounded-lg p-2 shadow-sm" />
-    </div>
+  <select id="classSelect">
+    <option value="">Select Class</option>
+    <option value="895163057">Nursery</option>
+    <option value="1160595593">Reception</option>
+    <option value="1345706755">Year 1</option>
+    <option value="1936279195">Year 2</option>
+    <option value="316633986">Year 3</option>
+    <option value="1739534263">Year 4</option>
+    <option value="17621944">Year 5</option>
+    <option value="1465173656">Year 6</option>
+    <option value="1305449456">Year 7</option>
+    <option value="230300680">Year 8</option>
+    <option value="1869557983">Year 9</option>
+    <option value="1475934526">Question Paper</option>
+  </select>
 
-    <div class="flex items-center gap-2">
-      <select id="classSelect" class="border rounded-lg p-2"></select>
-      <button id="reloadBtn" class="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">Reload Data</button>
-    </div>
-  </nav>
+  <input type="text" id="searchInput" placeholder="Search by book name... (e.g., Computing 7)">
 
-  <div class="p-4 text-sm text-gray-600">
-    Showing <span id="countDisplay">0</span> records
-  </div>
+  <table id="bookTable">
+    <thead>
+      <tr>
+        <th>Book Name</th>
+        <th>Writer</th>
+        <th>Class</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-  <div id="cardsContainer" class="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-    <div class="text-gray-400 text-center col-span-full">Loading data...</div>
-  </div>
+  <script>
+    const baseUrl = "https://docs.google.com/spreadsheets/d/1ny2U4pb4TdLOD1W50iBhd8Y2gMf1AE14upbEszWE4Iw/export?format=csv&gid=";
 
-<script>
-// ---- CLASS LIST + GID MAP ----
-const SHEETS = [
-  { name: "Nursery", gid: "895163057" },
-  { name: "Reception", gid: "1160595593" },
-  { name: "Year 1", gid: "1345706755" },
-  { name: "Year 2", gid: "1936279195" },
-  { name: "Year 3", gid: "316633986" },
-  { name: "Year 4", gid: "1739534263" },
-  { name: "Year 5", gid: "17621944" },
-  { name: "Year 6", gid: "1465173656" },
-  { name: "Year 7", gid: "1305449456" },
-  { name: "Year 8", gid: "230300680" },
-  { name: "Year 9", gid: "1869557983" },
-  { name: "Question Paper", gid: "1475934526" }
-];
+    let allBooks = [];
 
-const BASE = "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=";
+    async function loadSheet(gid) {
+      const url = baseUrl + gid;
+      const response = await fetch(url);
+      const data = await response.text();
 
-const cardsContainer = document.getElementById("cardsContainer");
-const classSelect = document.getElementById("classSelect");
-const searchInput = document.getElementById("searchInput");
-const reloadBtn = document.getElementById("reloadBtn");
-const countDisplay = document.getElementById("countDisplay");
-
-let allRows = [];
-let filteredRows = [];
-
-// ---- Setup Class Dropdown ----
-classSelect.innerHTML = `<option>All Classes</option>` + SHEETS.map(s => `<option>${s.name}</option>`).join("");
-
-// ---- Fetch All Sheets ----
-async function fetchAllSheets() {
-  cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">Loading data...</div>';
-
-  try {
-    const allData = await Promise.all(
-      SHEETS.map(s => fetch(BASE + s.gid).then(r => r.text()))
-    );
-
-    allRows = [];
-
-    allData.forEach((csvText, i) => {
-      const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
-      parsed.data.forEach(row => {
-        row._sheet = SHEETS[i].name;
-        allRows.push(normalizeRow(row));
+      return data.split("\n").slice(1).map(row => {
+        const cols = row.split(",");
+        return {
+          name: cols[0] ? cols[0].trim() : "",
+          writer: cols[1] ? cols[1].trim() : "",
+          className: cols[2] ? cols[2].trim() : ""
+        };
       });
+    }
+
+    document.getElementById("classSelect").addEventListener("change", async function() {
+      const gid = this.value;
+      if (!gid) return;
+
+      allBooks = await loadSheet(gid);
+      displayBooks(allBooks);
     });
 
-    applyFilter();
-  } catch (e) {
-    cardsContainer.innerHTML = '<div class="col-span-full text-red-500 text-center py-12">Failed to load data.</div>';
-  }
-}
+    document.getElementById("searchInput").addEventListener("input", function() {
+      const search = this.value.trim().toLowerCase();
+      const filtered = allBooks.filter(book =>
+        book.name.toLowerCase().split(" ").some(word => search.split(" ").every(s => word.includes(s)))
+      );
+      displayBooks(filtered);
+    });
 
-function normalizeRow(r) {
-  return {
-    SL: r["SL."] || "",
-    Subject: r["Subject"] || "",
-    "Book Name": r["Book Name"] || "",
-    Quantity: r["Quentity"] || r["Quantity"] || "",
-    Sale: r["Sale"] || "",
-    "Tkn By Teacher": r["Tkn By Teacher"] || r["Taken By Teacher"] || "",
-    Return: r["Return"] || "",
-    "New Receive": r["New Recive"] || r["New Receive"] || "",
-    "Total Book": r["Total Book"] || "",
-    Note: r["Note"] || "",
-    _sheet: r._sheet
-  };
-}
-
-// ---- Filtering ----
-function applyFilter() {
-  const selected = classSelect.value;
-  const query = searchInput.value.toLowerCase();
-
-  filteredRows = allRows.filter(r => {
-    let ok = selected === "All Classes" || r._sheet === selected;
-    if (query) {
-      ok = ok && `${r["Book Name"]} ${r.Subject} ${r.Note}`.toLowerCase().includes(query);
+    function displayBooks(list) {
+      const tableBody = document.querySelector("#bookTable tbody");
+      tableBody.innerHTML = list.map(book => `
+        <tr>
+          <td>${book.name}</td>
+          <td>${book.writer}</td>
+          <td>${book.className}</td>
+        </tr>
+      `).join("");
     }
-    return ok;
-  });
-
-  renderCards();
-}
-
-// ---- Render Cards ----
-function renderCards() {
-  cardsContainer.innerHTML = "";
-  countDisplay.textContent = filteredRows.length;
-
-  if (!filteredRows.length) {
-    cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">No records found.</div>';
-    return;
-  }
-
-  filteredRows.forEach(r => {
-    cardsContainer.innerHTML += `
-      <article class="bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm">
-        <h3 class="text-lg font-semibold">${r["Book Name"]}</h3>
-        <p class="text-gray-500">${r.Subject} • <b>${r._sheet}</b></p>
-        <div class="mt-3 grid grid-cols-2 gap-2">
-          <p>Quantity: ${r.Quantity}</p>
-          <p>Sale: ${r.Sale}</p>
-          <p>Teacher: ${r["Tkn By Teacher"]}</p>
-          <p>Return: ${r.Return}</p>
-          <p>New Receive: ${r["New Receive"]}</p>
-          <p class="font-semibold text-blue-600">Total: ${r["Total Book"]}</p>
-        </div>
-        ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${r.Note}</p>` : ""}
-      </article>
-    `;
-  });
-}
-
-// ---- Events ----
-searchInput.addEventListener("input", applyFilter);
-classSelect.addEventListener("change", applyFilter);
-reloadBtn.addEventListener("click", fetchAllSheets);
-
-// Load on Start
-fetchAllSheets();
-</script>
+  </script>
 
 </body>
 </html>
