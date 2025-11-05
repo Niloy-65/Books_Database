@@ -37,146 +37,116 @@
     <div class="text-gray-400 text-center col-span-full">Loading data from Google Sheets...</div>
   </div>
 
-  <script>
-    // ✅ Your live Google Sheet CSV link
-    const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQhxBP5cLyGjyc2pHt5N9-UYuzdlWbhBIoJkPVaNvNwAxTtMfgn2-6_MA01WGEFdsY_BLF0d0xR2KaR/pub?output=csv";
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script>
 
-    const cardsContainer = document.getElementById("cardsContainer");
-    const classSelect = document.getElementById("classSelect");
-    const searchInput = document.getElementById("searchInput");
-    const countDisplay = document.getElementById("countDisplay");
-    const reloadBtn = document.getElementById("reloadBtn");
+const SHEETS = [
+  // ⬇️ Replace these with your real gid values for each class tab
+  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=895163057", // Example: Nursery
+  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=123456789", // Example: Reception
+  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=987654321", // Example: Year 1
+];
 
-    let allRows = [];
-    let filteredRows = [];
+let allRows = [];
+let filteredRows = [];
 
-    const defaultClasses = [
-      "Nursery", "Reception", "Year 1", "Year 2", "Year 3", "Year 4",
-      "Year 5", "Year 6", "Year 7", "Year 8", "Year 9", "Question Paper"
-    ];
+async function fetchAllSheets() {
+  cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">Loading data...</div>';
 
-    function resetClassOptions() {
-      classSelect.innerHTML = "<option>All Classes</option>";
-      defaultClasses.forEach(cls => {
-        const opt = document.createElement("option");
-        opt.textContent = cls;
-        classSelect.appendChild(opt);
+  try {
+    // Fetch CSV from every sheet URL
+    const allData = await Promise.all(
+      SHEETS.map(url => fetch(url).then(r => r.text()))
+    );
+
+    // Parse & merge
+    allRows = [];
+    allData.forEach((csvText, index) => {
+      const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+
+      parsed.data.forEach(row => {
+        row._sheet = classSelect.options[index + 1]?.textContent || "Unknown";
+        allRows.push(normalizeRow(row));
       });
+    });
+
+    applyFilter();
+  } catch (err) {
+    console.error(err);
+    cardsContainer.innerHTML = '<div class="col-span-full text-red-500 text-center py-12">Failed to load data.</div>';
+  }
+}
+
+function normalizeRow(r) {
+  return {
+    SL: r["SL."] || "",
+    Subject: r["Subject"] || "",
+    "Book Name": r["Book Name"] || "",
+    Quantity: r["Quentity"] || r["Quantity"] || "",
+    Sale: r["Sale"] || "",
+    "Tkn By Teacher": r["Tkn By Teacher"] || r["Taken By Teacher"] || "",
+    Return: r["Return"] || "",
+    "New Receive": r["New Recive"] || r["New Receive"] || "",
+    "Total Book": r["Total Book"] || "",
+    Note: r["Note"] || "",
+    _sheet: r._sheet || "Unknown"
+  };
+}
+
+function applyFilter() {
+  const selected = classSelect.value;
+  const query = searchInput.value.toLowerCase();
+
+  filteredRows = allRows.filter(r => {
+    let ok = selected === "All Classes" || r._sheet === selected;
+    if (query) {
+      const combined = `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet}`.toLowerCase();
+      ok = ok && combined.includes(query);
     }
-    resetClassOptions();
+    return ok;
+  });
 
-    // ✅ Fetch CSV data from Google Sheets
-    async function fetchSheetData() {
-      cardsContainer.innerHTML =
-        '<div class="col-span-full text-gray-400 text-center py-12">Loading data from Google Sheets...</div>';
+  renderCards();
+}
 
-      try {
-        const res = await fetch(SHEET_URL);
-        if (!res.ok) throw new Error("Failed to fetch");
-        const csvText = await res.text();
+function renderCards() {
+  cardsContainer.innerHTML = "";
+  countDisplay.textContent = filteredRows.length;
 
-        // Parse CSV text manually
-        const rows = csvText.trim().split("\n").map(r => r.split(","));
-        const headers = rows[0].map(h => h.trim());
-        allRows = rows.slice(1).map(r => {
-          const obj = {};
-          headers.forEach((h, i) => obj[h] = r[i] ? r[i].trim() : "");
-          return normalizeRow(obj);
-        });
+  if (!filteredRows.length) {
+    cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">No records found.</div>';
+    return;
+  }
 
-        applyFilter();
-      } catch (err) {
-        console.error(err);
-        cardsContainer.innerHTML =
-          '<div class="col-span-full text-red-500 text-center py-12">Error loading data from Google Sheets.</div>';
-      }
-    }
+  filteredRows.forEach(r => {
+    cardsContainer.insertAdjacentHTML("beforeend", `
+      <article class="bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm">
+        <h3 class="text-lg font-semibold">${r["Book Name"]}</h3>
+        <p class="text-gray-500">${r.Subject} • <b>${r._sheet}</b></p>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <p>Quantity: ${r.Quantity}</p>
+          <p>Sale: ${r.Sale}</p>
+          <p>Teacher: ${r["Tkn By Teacher"]}</p>
+          <p>Return: ${r.Return}</p>
+          <p>New Receive: ${r["New Receive"]}</p>
+          <p class="font-semibold text-blue-600">Total: ${r["Total Book"]}</p>
+        </div>
+        ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${r.Note}</p>` : ""}
+      </article>
+    `);
+  });
+}
 
-    // Normalize column names
-    function normalizeRow(row) {
-      return {
-        SL: row["SL."] || "",
-        Subject: row["Subject"] || "",
-        "Book Name": row["Book Name"] || "",
-        Quantity: row["Quentity"] || "",
-        Sale: row["Sale"] || "",
-        "Tkn By Teacher": row["Tkn By Teacher"] || "",
-        Return: row["Return"] || "",
-        "New Receive": row["New Recive"] || "",
-        "Total Book": row["Total Book"] || "",
-        Note: row["Note"] || "",
-        _sheet: row["Subject"] || "Unknown"
-      };
-    }
+// Events
+searchInput.addEventListener("input", applyFilter);
+classSelect.addEventListener("change", applyFilter);
+reloadBtn.addEventListener("click", fetchAllSheets);
 
-    // ✅ Multi-word search system
-    function applyFilter() {
-      const selected = classSelect.value;
-      const query = searchInput.value.toLowerCase().trim();
-      const queryWords = query.split(/\s+/).filter(Boolean);
+// Load all data
+fetchAllSheets();
+</script>
 
-      filteredRows = allRows.filter((r) => {
-        let ok = true;
-        if (selected !== "All Classes") ok = r._sheet === selected;
-        if (queryWords.length) {
-          const combined = [
-            r["Book Name"],
-            r.Subject,
-            r.Note,
-            r._sheet,
-          ].join(" ").toLowerCase();
-          ok = ok && queryWords.every(w => combined.includes(w));
-        }
-        return ok;
-      });
-
-      renderCards();
-    }
-
-    // ✅ Render cards
-    function renderCards() {
-      cardsContainer.innerHTML = "";
-      countDisplay.textContent = filteredRows.length;
-
-      if (!filteredRows.length) {
-        cardsContainer.innerHTML =
-          '<div class="col-span-full text-gray-400 text-center py-12">No data found.</div>';
-        return;
-      }
-
-      filteredRows.forEach((r, i) => {
-        const card = document.createElement("article");
-        card.className = "bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm";
-        card.innerHTML = `
-          <div class="flex items-start justify-between">
-            <div>
-              <h3 class="text-lg font-semibold">${r["Book Name"] || "(No Name)"}</h3>
-              <p class="text-gray-500">${r.Subject || "Unknown"} • ${r._sheet}</p>
-            </div>
-            <div class="text-xs text-gray-400">SL: ${r.SL || i + 1}</div>
-          </div>
-          <dl class="mt-3 grid grid-cols-2 gap-2">
-            <div><dt class="text-gray-400">Quantity</dt><dd>${r.Quantity}</dd></div>
-            <div><dt class="text-gray-400">Sale</dt><dd>${r.Sale}</dd></div>
-            <div><dt class="text-gray-400">Tkn By Teacher</dt><dd>${r["Tkn By Teacher"]}</dd></div>
-            <div><dt class="text-gray-400">Return</dt><dd>${r.Return}</dd></div>
-            <div><dt class="text-gray-400">New Receive</dt><dd>${r["New Receive"]}</dd></div>
-            <div><dt class="text-gray-400">Total Book</dt><dd class="font-semibold text-blue-600">${r["Total Book"]}</dd></div>
-          </dl>
-          ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${r.Note}</p>` : ""}
-        `;
-        cardsContainer.appendChild(card);
-      });
-    }
-
-    // ✅ Events
-    searchInput.addEventListener("input", applyFilter);
-    classSelect.addEventListener("change", applyFilter);
-    reloadBtn.addEventListener("click", fetchSheetData);
-
-    // Load data on start
-    fetchSheetData();
-  </script>
 </body>
 </html>
+
 
