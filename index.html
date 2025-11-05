@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>School Books Record (Live)</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -21,10 +22,7 @@
     </div>
 
     <div class="flex items-center gap-2">
-      <select id="classSelect" class="border rounded-lg p-2">
-        <option>All Classes</option>
-      </select>
-
+      <select id="classSelect" class="border rounded-lg p-2"></select>
       <button id="reloadBtn" class="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">Reload Data</button>
     </div>
   </nav>
@@ -34,45 +32,61 @@
   </div>
 
   <div id="cardsContainer" class="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-    <div class="text-gray-400 text-center col-span-full">Loading data from Google Sheets...</div>
+    <div class="text-gray-400 text-center col-span-full">Loading data...</div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script>
-
+// ---- CLASS LIST + GID MAP ----
 const SHEETS = [
-  // ⬇️ Replace these with your real gid values for each class tab
-  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=895163057", // Example: Nursery
-  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=123456789", // Example: Reception
-  "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=987654321", // Example: Year 1
+  { name: "Nursery", gid: "895163057" },
+  { name: "Reception", gid: "1160595593" },
+  { name: "Year 1", gid: "1345706755" },
+  { name: "Year 2", gid: "1936279195" },
+  { name: "Year 3", gid: "316633986" },
+  { name: "Year 4", gid: "1739534263" },
+  { name: "Year 5", gid: "17621944" },
+  { name: "Year 6", gid: "1465173656" },
+  { name: "Year 7", gid: "1305449456" },
+  { name: "Year 8", gid: "230300680" },
+  { name: "Year 9", gid: "1869557983" },
+  { name: "Question Paper", gid: "1475934526" }
 ];
+
+const BASE = "https://docs.google.com/spreadsheets/d/1vorJeH359FKhsJx2umNlkMYeyOvDUZaEXpmujcbKtYU/export?format=csv&gid=";
+
+const cardsContainer = document.getElementById("cardsContainer");
+const classSelect = document.getElementById("classSelect");
+const searchInput = document.getElementById("searchInput");
+const reloadBtn = document.getElementById("reloadBtn");
+const countDisplay = document.getElementById("countDisplay");
 
 let allRows = [];
 let filteredRows = [];
 
+// ---- Setup Class Dropdown ----
+classSelect.innerHTML = `<option>All Classes</option>` + SHEETS.map(s => `<option>${s.name}</option>`).join("");
+
+// ---- Fetch All Sheets ----
 async function fetchAllSheets() {
   cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">Loading data...</div>';
 
   try {
-    // Fetch CSV from every sheet URL
     const allData = await Promise.all(
-      SHEETS.map(url => fetch(url).then(r => r.text()))
+      SHEETS.map(s => fetch(BASE + s.gid).then(r => r.text()))
     );
 
-    // Parse & merge
     allRows = [];
-    allData.forEach((csvText, index) => {
-      const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
 
+    allData.forEach((csvText, i) => {
+      const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
       parsed.data.forEach(row => {
-        row._sheet = classSelect.options[index + 1]?.textContent || "Unknown";
+        row._sheet = SHEETS[i].name;
         allRows.push(normalizeRow(row));
       });
     });
 
     applyFilter();
-  } catch (err) {
-    console.error(err);
+  } catch (e) {
     cardsContainer.innerHTML = '<div class="col-span-full text-red-500 text-center py-12">Failed to load data.</div>';
   }
 }
@@ -89,10 +103,11 @@ function normalizeRow(r) {
     "New Receive": r["New Recive"] || r["New Receive"] || "",
     "Total Book": r["Total Book"] || "",
     Note: r["Note"] || "",
-    _sheet: r._sheet || "Unknown"
+    _sheet: r._sheet
   };
 }
 
+// ---- Filtering ----
 function applyFilter() {
   const selected = classSelect.value;
   const query = searchInput.value.toLowerCase();
@@ -100,8 +115,7 @@ function applyFilter() {
   filteredRows = allRows.filter(r => {
     let ok = selected === "All Classes" || r._sheet === selected;
     if (query) {
-      const combined = `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet}`.toLowerCase();
-      ok = ok && combined.includes(query);
+      ok = ok && `${r["Book Name"]} ${r.Subject} ${r.Note}`.toLowerCase().includes(query);
     }
     return ok;
   });
@@ -109,6 +123,7 @@ function applyFilter() {
   renderCards();
 }
 
+// ---- Render Cards ----
 function renderCards() {
   cardsContainer.innerHTML = "";
   countDisplay.textContent = filteredRows.length;
@@ -119,7 +134,7 @@ function renderCards() {
   }
 
   filteredRows.forEach(r => {
-    cardsContainer.insertAdjacentHTML("beforeend", `
+    cardsContainer.innerHTML += `
       <article class="bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm">
         <h3 class="text-lg font-semibold">${r["Book Name"]}</h3>
         <p class="text-gray-500">${r.Subject} • <b>${r._sheet}</b></p>
@@ -133,20 +148,18 @@ function renderCards() {
         </div>
         ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${r.Note}</p>` : ""}
       </article>
-    `);
+    `;
   });
 }
 
-// Events
+// ---- Events ----
 searchInput.addEventListener("input", applyFilter);
 classSelect.addEventListener("change", applyFilter);
 reloadBtn.addEventListener("click", fetchAllSheets);
 
-// Load all data
+// Load on Start
 fetchAllSheets();
 </script>
 
 </body>
 </html>
-
-
