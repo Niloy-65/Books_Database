@@ -16,9 +16,11 @@
       <div class="text-sm text-gray-500 hidden md:block">Live from Google Sheets</div>
     </div>
 
-    <div class="flex-1 max-w-md">
-      <input id="searchInput" type="text" placeholder="Search by book name, subject, or note..."
-        class="w-full border rounded-lg p-2 shadow-sm" />
+    <div class="flex-1 max-w-2xl">
+      <!-- Enlarged search input -->
+      <input id="searchInput" type="text"
+        placeholder="Search by book name, subject, note or class — try: Computing 2, English 3, 'math'..."
+        class="w-full border rounded-2xl p-3 shadow-sm text-sm" />
     </div>
 
     <div class="flex items-center gap-2">
@@ -69,7 +71,6 @@ classSelect.innerHTML = `<option>All Classes</option>` + SHEETS.map(s => `<optio
 // ---- Fetch All Sheets ----
 async function fetchAllSheets() {
   cardsContainer.innerHTML = '<div class="col-span-full text-gray-400 text-center py-12">Loading data...</div>';
-
   try {
     const allData = await Promise.all(
       SHEETS.map(s => fetch(BASE + s.gid).then(r => r.text()))
@@ -80,6 +81,7 @@ async function fetchAllSheets() {
     allData.forEach((csvText, i) => {
       const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
       parsed.data.forEach(row => {
+        // attach the sheet name before normalization
         row._sheet = SHEETS[i].name;
         allRows.push(normalizeRow(row));
       });
@@ -87,38 +89,96 @@ async function fetchAllSheets() {
 
     applyFilter();
   } catch (e) {
+    console.error(e);
     cardsContainer.innerHTML = '<div class="col-span-full text-red-500 text-center py-12">Failed to load data.</div>';
   }
 }
 
 function normalizeRow(r) {
   return {
-    SL: r["SL."] || "",
+    SL: r["SL."] || r["SL"] || "",
     Subject: r["Subject"] || "",
-    "Book Name": r["Book Name"] || "",
+    "Book Name": r["Book Name"] || r["BookName"] || r["Book"] || "",
     Quantity: r["Quentity"] || r["Quantity"] || "",
     Sale: r["Sale"] || "",
-    "Tkn By Teacher": r["Tkn By Teacher"] || r["Taken By Teacher"] || "",
+    "Tkn By Teacher": r["Tkn By Teacher"] || r["Taken By Teacher"] || r["TknByTeacher"] || "",
     Return: r["Return"] || "",
     "New Receive": r["New Recive"] || r["New Receive"] || "",
-    "Total Book": r["Total Book"] || "",
+    "Total Book": r["Total Book"] || r["TotalBook"] || "",
     Note: r["Note"] || "",
-    _sheet: r._sheet
+    _sheet: r._sheet || ""
   };
+}
+
+// ---- Normalization for search (makes search forgiving) ----
+function normalizeForSearch(input) {
+  if (!input && input !== 0) return "";
+  let s = String(input).toLowerCase().trim();
+
+  // convert common unicode digits/characters to simple ascii (basic)
+  // remove/replace punctuation with spaces
+  s = s.replace(/[\u2018\u2019\u201C\u201D]/g, "'"); // smart quotes -> simple
+  // replace any non alnum with space (keep letters and digits)
+  s = s.replace(/[^a-z0-9]/g, ' ');
+
+  // ensure boundary between letters and digits: "computing2" -> "computing 2"
+  s = s.replace(/([a-z])([0-9])/g, '$1 $2').replace(/([0-9])([a-z])/g, '$1 $2');
+
+  // collapse multiple spaces
+  s = s.replace(/\s+/g, ' ').trim();
+
+  return s;
 }
 
 // ---- Filtering ----
 function applyFilter() {
   const selected = classSelect.value;
-  const query = searchInput.value.toLowerCase();
+  const rawQuery = searchInput.value || "";
+  const normalizedQuery = normalizeForSearch(rawQuery);
+  const tokens = normalizedQuery.split(' ').filter(Boolean);
 
   filteredRows = allRows.filter(r => {
-    let ok = selected === "All Classes" || r._sheet === selected;
-    if (query) {
-      ok = ok && `${r["Book Name"]} ${r.Subject} ${r.Note}`.toLowerCase().includes(query);
-    }
-    return ok;
+    // class filter
+    if (selected !== "All Classes" && r._sheet !== selected) return false;
+
+    // build a searchable text of several fields
+    const searchable = normalizeForSearch(
+      `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet} ${r["Tkn By Teacher"]} ${r.SL} ${r["Total Book"]}`
+    );
+
+    // if there's no query, keep the row (only class filter applies)
+    if (!tokens.length) return true;
+
+    // strict mode: every token must appear somewhere as substring
+    const strictOk = tokens.every(t => searchable.includes(t));
+    if (strictOk) return true;
+
+    // fallback permissive mode:
+    //  - check tokens against individual words (prefix match or substring)
+    //  - helpful when punctuation or small typos differ
+    const words = searchable.split(' ');
+    const permissiveOk = tokens.every(t => words.some(w => w.startsWith(t) || w.includes(t)));
+    if (permissiveOk) return true;
+
+    // final fallback: any token is very short (1-2 chars) — try to match exact whole words
+    const shortFallback = tokens.every(t => t.length <= 2 ? words.includes(t) : true);
+    if (shortFallback) return true;
+
+    return false;
   });
+
+  // If nothing found and user typed something, do a "relaxed fuzzy" that allows single-token partial match
+  if (!filteredRows.length && tokens.length && tokens.length <= 3) {
+    const relaxed = allRows.filter(r => {
+      if (selected !== "All Classes" && r._sheet !== selected) return false;
+      const searchable = normalizeForSearch(
+        `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet} ${r["Tkn By Teacher"]}`
+      );
+      // check if the combined query (raw) exists as substring after normalization
+      return searchable.includes(normalizedQuery);
+    });
+    if (relaxed.length) filteredRows = relaxed;
+  }
 
   renderCards();
 }
@@ -133,27 +193,51 @@ function renderCards() {
     return;
   }
 
+  // build cards
+  const frag = document.createDocumentFragment();
   filteredRows.forEach(r => {
-    cardsContainer.innerHTML += `
-      <article class="bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm">
-        <h3 class="text-lg font-semibold">${r["Book Name"]}</h3>
-        <p class="text-gray-500">${r.Subject} • <b>${r._sheet}</b></p>
-        <div class="mt-3 grid grid-cols-2 gap-2">
-          <p>Quantity: ${r.Quantity}</p>
-          <p>Sale: ${r.Sale}</p>
-          <p>Teacher: ${r["Tkn By Teacher"]}</p>
-          <p>Return: ${r.Return}</p>
-          <p>New Receive: ${r["New Receive"]}</p>
-          <p class="font-semibold text-blue-600">Total: ${r["Total Book"]}</p>
-        </div>
-        ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${r.Note}</p>` : ""}
-      </article>
+    const art = document.createElement('article');
+    art.className = "bg-white rounded-2xl p-4 shadow hover:shadow-md transition text-sm";
+    art.innerHTML = `
+      <h3 class="text-lg font-semibold">${escapeHtml(r["Book Name"] || "—")}</h3>
+      <p class="text-gray-500">${escapeHtml(r.Subject || "—")} • <b>${escapeHtml(r._sheet || "—")}</b></p>
+      <div class="mt-3 grid grid-cols-2 gap-2">
+        <p>Quantity: ${escapeHtml(r.Quantity || "—")}</p>
+        <p>Sale: ${escapeHtml(r.Sale || "—")}</p>
+        <p>Teacher: ${escapeHtml(r["Tkn By Teacher"] || "—")}</p>
+        <p>Return: ${escapeHtml(r.Return || "—")}</p>
+        <p>New Receive: ${escapeHtml(r["New Receive"] || "—")}</p>
+        <p class="font-semibold text-blue-600">Total: ${escapeHtml(r["Total Book"] || "—")}</p>
+      </div>
+      ${r.Note ? `<p class="mt-2 text-xs text-gray-500">Note: ${escapeHtml(r.Note)}</p>` : ""}
     `;
+    frag.appendChild(art);
   });
+  cardsContainer.appendChild(frag);
+}
+
+// simple HTML escaper for safety
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+// ---- Debounce helper so filtering doesn't run on every keystroke immediately ----
+function debounce(fn, wait = 250) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), wait);
+  };
 }
 
 // ---- Events ----
-searchInput.addEventListener("input", applyFilter);
+searchInput.addEventListener("input", debounce(applyFilter, 180));
 classSelect.addEventListener("change", applyFilter);
 reloadBtn.addEventListener("click", fetchAllSheets);
 
