@@ -19,7 +19,7 @@
     <div class="flex-1 max-w-2xl">
       <!-- Enlarged search input -->
       <input id="searchInput" type="text"
-        placeholder="Search by book name, subject, note or class — try: Computing 2, English 3, 'math'..."
+        placeholder="Search by book (when class selected) — e.g. Computing 2, English 3..."
         class="w-full border rounded-2xl p-3 shadow-sm text-sm" />
     </div>
 
@@ -115,13 +115,12 @@ function normalizeForSearch(input) {
   if (!input && input !== 0) return "";
   let s = String(input).toLowerCase().trim();
 
-  // convert common unicode digits/characters to simple ascii (basic)
-  // remove/replace punctuation with spaces
-  s = s.replace(/[\u2018\u2019\u201C\u201D]/g, "'"); // smart quotes -> simple
-  // replace any non alnum with space (keep letters and digits)
+  // convert common unicode quotes to ascii
+  s = s.replace(/[\u2018\u2019\u201C\u201D]/g, "'");
+  // keep only letters and digits as words; convert other chars to space
   s = s.replace(/[^a-z0-9]/g, ' ');
 
-  // ensure boundary between letters and digits: "computing2" -> "computing 2"
+  // insert space between letters and digits: "computing2" -> "computing 2"
   s = s.replace(/([a-z])([0-9])/g, '$1 $2').replace(/([0-9])([a-z])/g, '$1 $2');
 
   // collapse multiple spaces
@@ -141,41 +140,43 @@ function applyFilter() {
     // class filter
     if (selected !== "All Classes" && r._sheet !== selected) return false;
 
-    // build a searchable text of several fields
+    // If a specific class is selected, search ONLY in Book Name (per user's request)
+    if (selected !== "All Classes") {
+      // If no query, include the row
+      if (!tokens.length) return true;
+      const bookOnly = normalizeForSearch(r["Book Name"] || "");
+      // strict token matching on book name
+      const strictOk = tokens.every(t => bookOnly.includes(t));
+      if (strictOk) return true;
+      // permissive fallback: word start or substring
+      const words = bookOnly.split(' ');
+      const permissiveOk = tokens.every(t => words.some(w => w.startsWith(t) || w.includes(t)));
+      if (permissiveOk) return true;
+      return false;
+    }
+
+    // When All Classes is selected, search across multiple fields (book name, subject, note, sheet, teacher)
     const searchable = normalizeForSearch(
       `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet} ${r["Tkn By Teacher"]} ${r.SL} ${r["Total Book"]}`
     );
 
-    // if there's no query, keep the row (only class filter applies)
     if (!tokens.length) return true;
 
-    // strict mode: every token must appear somewhere as substring
-    const strictOk = tokens.every(t => searchable.includes(t));
-    if (strictOk) return true;
+    const strictOkAll = tokens.every(t => searchable.includes(t));
+    if (strictOkAll) return true;
 
-    // fallback permissive mode:
-    //  - check tokens against individual words (prefix match or substring)
-    //  - helpful when punctuation or small typos differ
-    const words = searchable.split(' ');
-    const permissiveOk = tokens.every(t => words.some(w => w.startsWith(t) || w.includes(t)));
-    if (permissiveOk) return true;
-
-    // final fallback: any token is very short (1-2 chars) — try to match exact whole words
-    const shortFallback = tokens.every(t => t.length <= 2 ? words.includes(t) : true);
-    if (shortFallback) return true;
+    const wordsAll = searchable.split(' ');
+    const permissiveOkAll = tokens.every(t => wordsAll.some(w => w.startsWith(t) || w.includes(t)));
+    if (permissiveOkAll) return true;
 
     return false;
   });
 
-  // If nothing found and user typed something, do a "relaxed fuzzy" that allows single-token partial match
-  if (!filteredRows.length && tokens.length && tokens.length <= 3) {
+  // Small relaxed fallback if class selected and nothing found: try raw normalized query against Book Name substring
+  if (!filteredRows.length && selected !== "All Classes" && normalizedQuery) {
     const relaxed = allRows.filter(r => {
-      if (selected !== "All Classes" && r._sheet !== selected) return false;
-      const searchable = normalizeForSearch(
-        `${r["Book Name"]} ${r.Subject} ${r.Note} ${r._sheet} ${r["Tkn By Teacher"]}`
-      );
-      // check if the combined query (raw) exists as substring after normalization
-      return searchable.includes(normalizedQuery);
+      if (r._sheet !== selected) return false;
+      return normalizeForSearch(r["Book Name"] || "").includes(normalizedQuery);
     });
     if (relaxed.length) filteredRows = relaxed;
   }
@@ -193,7 +194,7 @@ function renderCards() {
     return;
   }
 
-  // build cards
+  // build cards efficiently
   const frag = document.createDocumentFragment();
   filteredRows.forEach(r => {
     const art = document.createElement('article');
